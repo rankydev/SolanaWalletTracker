@@ -1,165 +1,7 @@
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import { config } from "./config";
-import { InsertNewTokenDetails, SplTokenStoreReponse, SplTokenTransfer } from "./types";
-
-// Transfers
-export async function createTransfersTable(database: any): Promise<boolean> {
-  try {
-    await database.exec(`
-        CREATE TABLE IF NOT EXISTS transfers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            signature TEXT NOT NULL UNIQUE,
-            timestamp INTEGER,
-            solTokenAccount TEXT NOT NULL,
-            newTokenAccount TEXT NOT NULL,
-            solTokenAmount INTEGER,
-            newTokenAmount INTEGER,
-            walletBuysToken INTEGER DEFAULT 0,
-            walletPaysFee INTEGER DEFAULT 1,
-            wallet TEXT NOT NULL,
-            fee INTEGER
-        );
-      `);
-    return true;
-  } catch (error: any) {
-    console.error("Error creating TokenData table:", error);
-    return false;
-  }
-}
-export async function insertTransfer(transfers: SplTokenTransfer[]): Promise<SplTokenStoreReponse> {
-  try {
-    const db = await open({
-      filename: config.db.db_name_tracker_transfers,
-      driver: sqlite3.Database,
-    });
-
-    // Create Table if not exists
-    const transfersTableExist = await createTransfersTable(db);
-    if (!transfersTableExist) {
-      await db.close();
-      throw new Error("Could not create transfers table.");
-    }
-
-    const placeholders = transfers.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
-    const values = transfers.flatMap((transfer) => [
-      transfer.signature,
-      transfer.timestamp,
-      transfer.newTokenAccount,
-      transfer.solTokenAccount,
-      transfer.newTokenAmount,
-      transfer.solTokenAmount,
-      transfer.walletBuysToken ? 1 : 0,
-      transfer.wallet,
-      transfer.fee,
-      transfer.walletPaysFee ? 1 : 0,
-    ]);
-
-    const sql = `
-      INSERT OR IGNORE INTO transfers (
-        signature, 
-        timestamp, 
-        newTokenAccount, 
-        solTokenAccount, 
-        newTokenAmount, 
-        solTokenAmount, 
-        walletBuysToken, 
-        wallet,
-        fee, 
-        walletPaysFee
-      ) VALUES ${placeholders};
-    `;
-
-    const result = await db.run(sql, values, function (err: any) {
-      if (err) {
-        throw new Error("Could not store transfers: " + err.message);
-      }
-    });
-
-    const changeCount = result.changes ? result.changes : 0;
-    const lastID = result.lastID ? result.lastID : 0;
-
-    // Return data
-    const returnData: SplTokenStoreReponse = {
-      count: changeCount,
-      msg: "success",
-      success: true,
-      lastId: lastID,
-    };
-
-    await db.close();
-    return returnData;
-  } catch (error: any) {
-    // Return data
-    const returnData: SplTokenStoreReponse = {
-      count: 0,
-      msg: "Error: " + error.message,
-      success: false,
-      lastId: 0,
-    };
-    return returnData;
-  }
-}
-export async function selectTokenTransferById(id: number): Promise<any> {
-  const db = await open({
-    filename: config.db.db_name_tracker_transfers,
-    driver: sqlite3.Database,
-  });
-
-  // Create Table if not exists
-  const transfersTableExist = await createTransfersTable(db);
-  if (!transfersTableExist) {
-    await db.close();
-    throw new Error("Could not create transfers table.");
-  }
-
-  // Query the database for matching tokens
-  const transfer = await db.all(
-    `
-    SELECT * 
-    FROM transfers
-    WHERE id=?;
-  `,
-    [id]
-  );
-
-  // Close the database
-  await db.close();
-
-  // Return the results
-  return transfer;
-}
-export async function selectTokenTransfersByAddress(wallet: string, limit: number): Promise<SplTokenTransfer[]> {
-  const db = await open({
-    filename: config.db.db_name_tracker_transfers,
-    driver: sqlite3.Database,
-  });
-
-  // Create Table if not exists
-  const transfersTableExist = await createTransfersTable(db);
-  if (!transfersTableExist) {
-    await db.close();
-    throw new Error("Could not create transfers table.");
-  }
-
-  // Query the database for matching tokens
-  const transfers = await db.all(
-    `
-    SELECT * 
-    FROM transfers
-    WHERE wallet=? 
-    ORDER BY id DESC
-    LIMIT ?;
-  `,
-    [wallet, limit]
-  );
-
-  // Close the database
-  await db.close();
-
-  // Return the results
-  return transfers;
-}
+import { InsertNewTokenDetails, SplTokenHolding, SplTokenStoreReponse, SplTokenTransfer } from "./types";
 
 // Tokens
 export async function createTableNewTokens(database: any): Promise<boolean> {
@@ -234,5 +76,95 @@ export async function insertNewToken(newToken: InsertNewTokenDetails) {
     );
 
     await db.close();
+  }
+}
+
+// New
+export async function createHoldingsTable(database: any): Promise<boolean> {
+  try {
+    await database.exec(`
+        CREATE TABLE IF NOT EXISTS holdings (
+            address TEXT NOT NULL PRIMARY KEY UNIQUE,
+            mint TEXT NOT NULL,
+            owner TEXT NOT NULL,
+            amount INTEGER,
+            delegated_amount INTEGER,
+            frozen INTEGER DEFAULT 0
+        );
+      `);
+    return true;
+  } catch (error: any) {
+    console.error("Error creating TokenData table:", error);
+    return false;
+  }
+}
+export async function updateHoldings(holdings: SplTokenHolding[], walletAddress: string): Promise<SplTokenStoreReponse> {
+  try {
+    const db = await open({
+      filename: config.db.db_name_tracker_transfers,
+      driver: sqlite3.Database,
+    });
+
+    // Create Table if not exists
+    const transfersTableExist = await createHoldingsTable(db);
+    if (!transfersTableExist) {
+      await db.close();
+      throw new Error("Could not create transfers table.");
+    }
+
+    // Get current tokens from the database
+    const currentTokens = await db.all<{ address: string }[]>(`SELECT address FROM holdings WHERE owner="${walletAddress}"`);
+    const currentAddresses = new Set(currentTokens.map((row) => row.address));
+
+    // Extract incoming addresses
+    const incomingAddresses = new Set(holdings.map((holding) => holding.address));
+
+    // Find added and removed holdings
+    const addedTokens = holdings.filter((holding) => !currentAddresses.has(holding.address));
+    const removedTokens = Array.from(currentAddresses).filter((address) => !incomingAddresses.has(address));
+
+    // Remove tokens no longer present in the incoming array
+    if (removedTokens.length > 0) {
+      const placeholders = removedTokens.map(() => "?").join(",");
+      await db.run(`DELETE FROM holdings WHERE owner="${walletAddress}" AND address IN (${placeholders})`, ...removedTokens);
+    }
+
+    // Insert or update incoming tokens
+    const upsertStatement = `
+      INSERT INTO holdings (address, mint, owner, amount, delegated_amount, frozen)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(address) DO UPDATE SET
+        mint = excluded.mint,
+        owner = excluded.owner,
+        amount = excluded.amount,
+        delegated_amount = excluded.delegated_amount,
+        frozen = excluded.frozen
+    `;
+
+    for (const token of holdings) {
+      await db.run(upsertStatement, token.address, token.mint, token.owner, token.amount, token.delegated_amount, token.frozen);
+    }
+
+    // Close the database connection
+    await db.close();
+
+    // Return data
+    const returnData: SplTokenStoreReponse = {
+      added: addedTokens,
+      removed: removedTokens,
+      msg: "success",
+      success: true,
+    };
+
+    return returnData;
+  } catch (error: any) {
+    // Return data
+    const returnData: SplTokenStoreReponse = {
+      added: [],
+      removed: [],
+      msg: "Error: " + error.message,
+      success: false,
+    };
+    return returnData;
   }
 }

@@ -1,11 +1,13 @@
-import { Connection } from "@solana/web3.js";
+import { PublicKey } from "@solana/web3.js";
+import WebSocket from "ws"; // Node.js websocket library
 import * as dotenv from "dotenv";
-import { getTransferDetails, getWalletTokenTransfers } from "./walletTracker";
-import { NewTokenTransfersDetails, SplTokenStoreReponse, SplTokenTransferReponse } from "./types";
+import { getWalletTokenHoldings } from "./walletTracker";
+import { getAccountInfoStreamReponseWithConfirmation, GetWalletTokenHoldingsResponse, SplTokenHolding, SplTokenStoreReponse } from "./types";
 import { config } from "./config";
-import { insertTransfer } from "./db";
+import { updateHoldings } from "./db";
 import { DateTime } from "luxon";
 
+// Load env variables
 dotenv.config();
 
 // Create regional functions to push transfers and logs to const
@@ -19,132 +21,173 @@ function shortenAddress(address: string): string {
   return `${start}...${end}`;
 }
 
-// Create Action Log constant
+// Create Action and holdings Log constant
 const actionsLogs: string[] = [];
+let holdingLogs: string[] = [];
+function showLogs() {
+  const wallets = config.wallets;
+  console.clear();
+  console.log(`📈 Tracked Wallets overview`);
+  console.log("================================================================================");
+  if (wallets.length === 0) console.log("🔎 No wallets to track at this moment: ", new Date().toISOString());
+  console.log(holdingLogs.join("\n"));
 
-// Initialize Connection
-const connection = new Connection(process.env.HELIUS_HTTPS_URI!, "confirmed");
-async function initializeConnection(): Promise<void> {
-  try {
-    const version = await connection.getVersion();
-    console.log(`✅ Connected to Solana! Node Version: ${version["solana-core"]}`);
-  } catch (error) {
-    console.error("Failed to connect to Solana:", error);
-    process.exit(1); // Exit the app if the connection fails
-  }
+  // Output Action Logs
+  console.log("\n\n📜 Action Logs");
+  console.log("================================================================================");
+  console.log(actionsLogs.slice().reverse().join("\n"));
 }
 
-// Main to fetch token transfers for provided wallets
+// Main to fetch token holdings for provided wallets
 let firstRun = true;
-async function main(): Promise<void> {
-  let transferLimit = config.settings.transfer_limit || 5;
-  if (firstRun) {
-    transferLimit = config.settings.first_run_transfer_limit || 30;
-  }
-
+async function fetchHoldings(): Promise<void> {
   try {
-    const transfersLogs: string[] = [];
+    holdingLogs.length = 0;
 
     const wallets = config.wallets;
     let walletCount = 1;
     for (const wallet of wallets) {
-      const walletAddress = wallet.walletAddress;
+      const walletAddress = wallet.address;
       const walletName = wallet.name;
+      const walletTags = wallet.tags;
+      const walletEmoji = wallet.emoji;
 
-      // @TODO, verify if actuall address
-      // @TODO, get actual wallet stats like PnL...
-
-      //Get the current price
-      saveLogTo(transfersLogs, `🏆 ${walletCount}. ${wallet.name} (${shortenAddress(wallet.walletAddress)}) | PnL: 0.0%`);
-      walletCount++;
-
-      // Get token transfers for wallet
-      const tokenTransfers: SplTokenTransferReponse = await getWalletTokenTransfers(connection, walletAddress, transferLimit);
-
-      // Check if fetching the transfers was successfull
-      if (!tokenTransfers.success) {
-        console.log(tokenTransfers.msg);
+      // Verify if this is a valid walletAddress
+      let publicKey;
+      try {
+        publicKey = new PublicKey(walletAddress);
+      } catch (error) {
+        console.log(`🚫 Invalid walletAddress, proceeding with next wallet `);
+        continue;
       }
 
-      // Check if we received transfers
-      if (tokenTransfers.data.length === 0) continue;
+      // Get all the spl-token holdings for this wallet
+      const tokenHoldings: GetWalletTokenHoldingsResponse = await getWalletTokenHoldings(publicKey.toString());
 
-      // Store transfers in local database
-      const stored: SplTokenStoreReponse = await insertTransfer(tokenTransfers.data);
+      // Check if fetching the holdings was successfull
+      if (!tokenHoldings.success) {
+        saveLogTo(actionsLogs, tokenHoldings.msg);
+        continue;
+      }
+
+      // Store in safe variable
+      const tokenHoldingsData: SplTokenHolding[] = tokenHoldings.data;
+
+      // Output the wallets that we are tracking
+      saveLogTo(holdingLogs, `${walletCount}. ${wallet.name} ${walletEmoji} (${shortenAddress(walletAddress)}) holds ${tokenHoldingsData.length} SPL-Tokens`);
+      walletCount++;
+
+      // Store holdings in local database
+      const stored: SplTokenStoreReponse = await updateHoldings(tokenHoldingsData, publicKey.toString());
       if (!stored.success) {
         saveLogTo(actionsLogs, `⛔ Error while storing transfers for wallet ${walletName}. Reason: ${stored.msg}`);
         continue;
       }
 
-      // Check if transfers were added
-      if (stored.count !== 0 && stored.lastId) {
-        // Do not show new transfers when runnin initial transfers lookup
-        if (!firstRun) {
-          // Get new token information
-          const newTokenTransferDetails: NewTokenTransfersDetails = await getTransferDetails(connection, walletAddress, stored.count, stored.lastId);
-          if (!newTokenTransferDetails.success) {
-            saveLogTo(actionsLogs, `⛔ Error while fetching new transfers for wallet ${walletName}. Reason: ${newTokenTransferDetails.msg}`);
-            continue;
-          }
-
-          const transfers = newTokenTransferDetails.data;
-
-          // Add to action logs
-          if (transfers && transfers.length !== 0) {
-            transfers.forEach((transfer) => {
-              const transferDirection = transfer.transfer.walletBuysToken ? "🟢 Buy" : "🔴 Sell";
-              const transferToken = transfer.token.name;
-              const transferMint = transfer.token.mint;
-              const transferSymbol = transfer.token.symbol;
-              const transferTime = transfer.transfer.timestamp;
-              const transferSol = transfer.transfer.solTokenAmount;
-              const transferInvertSol = transfer.transfer.newTokenAmount;
-              const tokenBurnt = transfer.token.burnt === 1 ? "🔥" : "💧";
-              const tokenMutable = transfer.token.mutable === 1 ? "🔒" : "🔓";
-
-              // Conver Trade Time
-              const centralEuropenTime = DateTime.fromSeconds(transferTime).toLocal();
-              const hrTradeTime = centralEuropenTime.toFormat("HH:mm:ss");
-
-              // Get inspect attibutes
-              const inspectUrl = config.settings.inspect_url + transferMint;
-              const inspectName = config.settings.inspect_name;
-              const inspectText = "\x1b]8;;" + inspectUrl + "\x1b\\" + inspectName + "\x1b]8;;\x1b\\";
-
-              saveLogTo(
-                actionsLogs,
-                `${hrTradeTime} ${transferDirection} | ${walletName} | ${tokenBurnt}${tokenMutable} ${transferInvertSol} ${transferToken} (${transferSymbol}) for ${transferSol} SOL | ${inspectText}`
-              );
-            });
-          }
+      // Output holding changes
+      if (!firstRun) {
+        // Check if a holding was added
+        if (stored.added.length !== 0) {
+          saveLogTo(actionsLogs, `✅ ${walletName} ${walletEmoji} added ${stored.added.length} new holding(s).`);
         }
-
-        // Add to action logs
-        if (firstRun) saveLogTo(actionsLogs, `✅ ${stored.count} transfer(s) were successfully added to wallet: ${walletName}`);
+        // Check if a holding was removed
+        if (stored.removed.length !== 0) {
+          saveLogTo(actionsLogs, `❌ ${walletName} ${walletEmoji} removed ${stored.removed.length} holding(s).`);
+        }
       }
     }
 
     // Output Current Walletst
-    console.clear();
-    console.log(`📈 Tracked Wallets overview`);
-    console.log("================================================================================");
-    if (wallets.length === 0) console.log("🔎 No wallets to track at this moment: ", new Date().toISOString());
-    console.log(transfersLogs.join("\n"));
-
-    // Output Action Logs
-    console.log("\n\n📜 Action Logs");
-    console.log("================================================================================");
-    console.log(actionsLogs.slice().reverse().join("\n"));
+    showLogs();
 
     firstRun = false;
-    setTimeout(main, config.settings.tracker_timeout);
   } catch (error) {
     console.error("Error:", error);
   }
 }
 
-initializeConnection()
-  .then(main)
+// Logic for processing fetch holdings
+const messageQueue: string[] = [];
+let processing = false;
+async function processQueue() {
+  if (processing) return;
+  processing = true;
+
+  while (messageQueue.length > 0) {
+    messageQueue.shift();
+    await fetchHoldings();
+  }
+
+  processing = false;
+}
+
+async function accountSubscribeStream(): Promise<void> {
+  let ws: WebSocket | null = new WebSocket(process.env.HELIUS_WSS_URI || "");
+  const subscribeWallets = config.wallets;
+
+  // Logic when websocket opens
+  ws.on("open", () => {
+    saveLogTo(actionsLogs, "🔓 WebSocket open. Proceeding with wallet subscriptions...");
+    // Subscribe to each wallet's address
+    subscribeWallets.forEach((wallet) => {
+      const subscriptionMessage = {
+        jsonrpc: "2.0",
+        id: wallet.address, // Use the address as the ID for tracking
+        method: "accountSubscribe",
+        params: [
+          wallet.address,
+          {
+            encoding: "jsonParsed",
+            commitment: "",
+          },
+        ],
+      };
+      ws.send(JSON.stringify(subscriptionMessage));
+    });
+  });
+
+  // Logic when websocket receives a message
+  ws.on("message", async (data: WebSocket.Data) => {
+    try {
+      const jsonString = data.toString();
+      const accountInfo: getAccountInfoStreamReponseWithConfirmation = JSON.parse(jsonString);
+
+      // Handle subscription confirmation
+      if (
+        "result" in accountInfo &&
+        typeof accountInfo.result === "number" &&
+        accountInfo.id &&
+        subscribeWallets.some((wallet) => wallet.address === accountInfo.id)
+      ) {
+        // Output subscription confirmation
+        const getWallet = accountInfo.id;
+        const wallet = subscribeWallets.find((w) => w.address === getWallet);
+        saveLogTo(actionsLogs, `✅ Subscribed and listening to websocket stream for ${wallet?.emoji} ${wallet?.name}`);
+        showLogs();
+        return;
+      }
+
+      messageQueue.push(data.toString());
+      processQueue();
+    } catch (e) {
+      console.error("Error processing message:", e);
+    }
+  });
+
+  // Logic when websocket Has an error
+  ws.on("error", (err: Error) => {
+    console.error("🚫 WebSocket error:", err);
+  });
+
+  // Logic when websocket Closes
+  ws.on("close", () => {
+    console.log(`🔐 WebSocket closed. Trying to reconnect...`);
+    setTimeout(() => accountSubscribeStream(), 5000);
+  });
+}
+
+fetchHoldings()
+  .then(accountSubscribeStream)
   .catch((err) => {
     console.error("Initialization error:", err.message);
     process.exit(1); // Exit if initialization fails

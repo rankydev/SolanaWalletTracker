@@ -1,6 +1,14 @@
-import { Connection } from "@solana/web3.js";
 import axios from "axios";
-import { GetTokenAccountsResponse, GetWalletTokenHoldingsResponse, NewTokenTransfersDetails, SplTokenHolding } from "./types";
+import {
+  DuplicateOwnerMintRecord,
+  GetTokenAccountsResponse,
+  GetWalletTokenHoldingsResponse,
+  MintWithOwners,
+  MintWithOwnersResponse,
+  NewTokenTransfersDetails,
+  SplTokenHolding,
+} from "./types";
+import { checkMultipleOwnersForMint } from "./db";
 
 export async function getWalletTokenHoldings(walletAddress: string): Promise<GetWalletTokenHoldingsResponse> {
   try {
@@ -49,102 +57,52 @@ export async function getWalletTokenHoldings(walletAddress: string): Promise<Get
   }
 }
 
-// Old
-export async function getTransferDetails(connection: Connection, walletAddress: string, count: number, transferId: number): Promise<any> {
+export async function getDoubleHoldings(): Promise<MintWithOwnersResponse> {
   try {
-    if (!connection.rpcEndpoint || !walletAddress || !count || !transferId) throw new Error("Invalid request. Missing parameters.");
+    // Get duplicates
+    const duplicates: DuplicateOwnerMintRecord[] = await checkMultipleOwnersForMint();
+    if (duplicates.length < 1) {
+      return { success: true, duplicates: [], msg: "success" };
+    }
 
-    // // Get the added transfers for walletAdress
-    // // const latestTransfers: SplTokenTransfer[] = await selectTokenTransfersByAddress(walletAddress, count);
-    // // if (!latestTransfers || latestTransfers.length === 0) throw new Error("No valid transfers found");
+    // Example:
+    // duplicates = [
+    //   { "mint": "mint1", "owner": "owner1" },
+    //   { "mint": "mint1", "owner": "owner2" },
+    //   { "mint": "mint2", "owner": "owner3" },
+    //   { "mint": "mint2", "owner": "owner4" }
+    // ];
 
-    // // Loop trough transfers
-    // const tokenTransfers: TokenTransferDetails[] = []; // Initialize an empty array
-    // for (const transfer of latestTransfers) {
-    //   const transferId = transfer.id;
-    //   const tokenAddress = transfer.newTokenAccount;
-    //   if (!transferId || !tokenAddress) continue;
+    // Stote duplicates in structured array
+    const result: MintWithOwners[] = [];
+    duplicates.forEach((record) => {
+      // Find existing mint group or create a new one
+      let mintGroup = result.find((item) => item.mint === record.mint);
 
-    //   // Set empty token for this transfer
-    //   let newToken: InsertNewTokenDetails;
+      if (!mintGroup) {
+        mintGroup = { mint: record.mint, owners: [] };
+        result.push(mintGroup);
+      }
 
-    //   // Get the token details for this transfer
-    //   const token = await selectTokenByTransferId(transferId);
-    //   if (!token || token.length === 0) {
-    //     // getAsset via Digital Asset Standard (DAS) API
-    //     const res = await axios.post<any>(
-    //       connection.rpcEndpoint,
-    //       {
-    //         jsonrpc: "2.0",
-    //         id: "test",
-    //         method: "getAsset",
-    //         params: {
-    //           id: tokenAddress,
-    //         },
-    //       },
-    //       {
-    //         headers: {
-    //           "Content-Type": "application/json",
-    //         },
-    //         timeout: 10000,
-    //       }
-    //     );
+      // Add the owner to the mint group if not already added
+      if (mintGroup && !mintGroup.owners.includes(record.owner)) {
+        mintGroup.owners.push(record.owner);
+      }
+    });
 
-    //     // Verify if a response was received
-    //     if (!res.data) {
-    //       continue;
-    //     }
-
-    //     // Extract token details
-    //     const tokenDetails: dasGetAssetReponse = res.data;
-    //     const tokenMetaName = tokenDetails.result.content.metadata.name || "N/A";
-    //     const tokenMetaSybol = tokenDetails.result.content.metadata.symbol || "N/A";
-    //     const tokenMutable = tokenDetails.result.mutable ? 1 : 0;
-    //     const tokenBurnt = tokenDetails.result.burnt ? 1 : 0;
-
-    //     // Create new token object
-    //     newToken = {
-    //       burnt: tokenBurnt,
-    //       mint: tokenAddress,
-    //       mutable: tokenMutable,
-    //       name: tokenMetaName,
-    //       symbol: tokenMetaSybol,
-    //     };
-    //   } else {
-    //     // Create new token object
-    //     newToken = {
-    //       burnt: token[0].burnt,
-    //       mint: token[0].mint,
-    //       mutable: token[0].mutable,
-    //       name: token[0].name,
-    //       symbol: token[0].symbol,
-    //     };
+    // Example:
+    // result = [
+    //   {
+    //     mint: 'mint1',
+    //     owners: [
+    //       'owner1',
+    //       'owner2'
+    //     ]
     //   }
+    // ]
 
-    //   // push to transfers array
-    //   const newTransfer: TokenTransferDetails = {
-    //     transfer: transfer,
-    //     token: newToken,
-    //   };
-
-    //   tokenTransfers.push(newTransfer); // Push the new object to the array
-    // }
-
-    // // Return data
-    // const returnData: NewTokenTransfersDetails = {
-    //   data: tokenTransfers,
-    //   msg: "succes",
-    //   success: true,
-    // };
-
-    // return returnData;
+    return { success: true, duplicates: result, msg: "success" };
   } catch (error: any) {
-    // Return error
-    const returnData: NewTokenTransfersDetails = {
-      data: [],
-      msg: error.message,
-      success: false,
-    };
-    return returnData;
+    return { success: false, duplicates: [], msg: error };
   }
 }

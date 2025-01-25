@@ -3,6 +3,7 @@ export const config = {
     wsol_pc_mint: "So11111111111111111111111111111111111111112",
     inspect_url: "https://gmgn.ai/sol/token/",
     inspect_name: "👽 Open GMGN",
+    inspect_url_wallet: "https://gmgn.ai/sol/address/",
   },
   db: {
     db_name_tracker_transfers: "src/db/transfers.db", // Sqlite Database location

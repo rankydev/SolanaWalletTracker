@@ -1,85 +1,9 @@
 import sqlite3 from "sqlite3";
 import { open } from "sqlite";
 import { config } from "./config";
-import { InsertNewTokenDetails, SplTokenHolding, SplTokenStoreReponse, SplTokenTransfer } from "./types";
+import { DuplicateOwnerMintRecord, SplTokenHolding, SplTokenStoreReponse } from "./types";
 
-// Tokens
-export async function createTableNewTokens(database: any): Promise<boolean> {
-  try {
-    await database.exec(`
-    CREATE TABLE IF NOT EXISTS tokens (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      mint TEXT NOT NULL,
-      name TEXT NOT NULL,
-      symbol TEXT NOT NULL,
-      mutable TEXT NOT NULL,
-      burnt TEXT NOT NULL
-    );
-  `);
-    return true;
-  } catch (error: any) {
-    return false;
-  }
-}
-export async function selectTokenByTransferId(id: number): Promise<InsertNewTokenDetails[]> {
-  const db = await open({
-    filename: config.db.db_name_tracker_transfers,
-    driver: sqlite3.Database,
-  });
-
-  // Create Table if not exists
-  const newTokensTableExist = await createTableNewTokens(db);
-  if (!newTokensTableExist) {
-    await db.close();
-    throw new Error("Could not create tokens table.");
-  }
-
-  // Query the database for matching tokens
-  const token = await db.all(
-    `
-    SELECT * 
-    FROM tokens
-    WHERE mint IN (SELECT newTokenAccount FROM transfers WHERE id=?);
-  `,
-    [id]
-  );
-
-  // Close the database
-  await db.close();
-
-  // Return the results
-  return token;
-}
-export async function insertNewToken(newToken: InsertNewTokenDetails) {
-  const db = await open({
-    filename: config.db.db_name_tracker_transfers,
-    driver: sqlite3.Database,
-  });
-
-  // Create Table if not exists
-  const newTokensTableExist = await createTableNewTokens(db);
-  if (!newTokensTableExist) {
-    await db.close();
-    throw new Error("Could not create tokens table.");
-  }
-
-  // Proceed with adding holding
-  if (newTokensTableExist) {
-    const { mint, burnt, mutable, name, symbol } = newToken;
-
-    await db.run(
-      `
-    INSERT INTO tokens (mint, name, symbol, mutable, burnt)
-    VALUES (?, ?, ?, ?, ?);
-  `,
-      [mint, name, symbol, mutable, burnt]
-    );
-
-    await db.close();
-  }
-}
-
-// New
+// Holdings
 export async function createHoldingsTable(database: any): Promise<boolean> {
   try {
     await database.exec(`
@@ -166,5 +90,43 @@ export async function updateHoldings(holdings: SplTokenHolding[], walletAddress:
       success: false,
     };
     return returnData;
+  }
+}
+export async function checkMultipleOwnersForMint(): Promise<DuplicateOwnerMintRecord[]> {
+  const db = await open({
+    filename: config.db.db_name_tracker_transfers,
+    driver: sqlite3.Database,
+  });
+
+  // Create Table if not exists
+  const transfersTableExist = await createHoldingsTable(db);
+  if (!transfersTableExist) {
+    await db.close();
+    throw new Error("Could not create transfers table.");
+  }
+
+  try {
+    const query = `
+      SELECT mint, owner
+      FROM holdings
+      WHERE mint IN (
+        SELECT mint
+        FROM holdings
+        GROUP BY mint
+        HAVING COUNT(DISTINCT owner) >= 2
+      )
+    `;
+
+    const rows = await db.all(query);
+
+    // If there are rows with multiple owners for the same mint, return them
+    if (rows.length > 0) {
+      return rows; // Rows will contain mint and owner
+    }
+
+    return []; // No mints with 2 or more owners
+  } catch (error: any) {
+    console.error("Error checking multiple owners for mint:", error);
+    return [];
   }
 }

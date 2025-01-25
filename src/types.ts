@@ -309,3 +309,16 @@ export interface getAccountInfoStreamReponseWithConfirmation extends getAccountI
   id?: string; // Confirmation ID
   result?: null; // Confirmation result
 }
+export interface DuplicateOwnerMintRecord {
+  mint: string;
+  owner: string;
+}
+export interface MintWithOwners {
+  mint: string;
+  owners: string[];
+}
+export interface MintWithOwnersResponse {
+  success: boolean;
+  duplicates: MintWithOwners[];
+  msg: string;
+}

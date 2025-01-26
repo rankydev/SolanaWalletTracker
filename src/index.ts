@@ -53,6 +53,28 @@ function showLogs() {
   console.log("\n\n📜 Action Logs");
   console.log("================================================================================");
   console.log(actionsLogs.slice().reverse().join("\n"));
+
+  // 💼 Tracked Wallets overview
+  // ================================================================================
+  // Wallet0 👽 (GchN...MK4s) holds 5 SPL-Tokens
+  // Wallet1 🀄️ (KEN7...WdYT) holds 265 SPL-Tokens
+  // Frank 😂 (CRVi...tReL) holds 1000 SPL-Tokens
+  // Profit 💰 (G5nx...7w5E) holds 784 SPL-Tokens
+  // DigBen 🚀 (CKdd...GiJ9) holds 0 SPL-Tokens
+
+  // 🔥 Duplicate holdings
+  // ================================================================================
+  // 📢 There are 115 more duplicates not shown.
+  // 🔍 Token 9YX6...xQKW (3 💼): 👽 Open GMGN
+
+  // 📜 Action Logs
+  // ================================================================================
+  // ✅ Subscribed and listening to websocket stream for 🚀 DigBen
+  // ✅ Subscribed and listening to websocket stream for 💰 Profit
+  // ✅ Subscribed and listening to websocket stream for 😂 Frank
+  // ✅ Subscribed and listening to websocket stream for 🀄️ Wallet1
+  // ✅ Subscribed and listening to websocket stream for 👽 Wallet0
+  // 🔓 WebSocket open. Proceeding with wallet subscriptions...
 }
 
 // Main to fetch token holdings for provided wallets
@@ -100,6 +122,11 @@ async function fetchHoldings(walletToSync?: string): Promise<void> {
       // Output the wallets that we are tracking
       const inspectText = `\x1b]8;;${config.settings.inspect_url_wallet}${walletAddress}\x1b\\${shortenAddress(walletAddress)}\x1b]8;;\x1b\\`;
       holdingLogs.set(walletAddress, `${wallet.name} ${walletEmoji} (${inspectText}) holds ${tokenHoldingsData.length} SPL-Tokens`);
+
+      // 💼 Tracked Wallets overview
+      // ================================================================================
+      // Wallet0 👽 (GchN...MK4s) holds 5 SPL-Tokens
+      // Wallet1 🀄️ (KEN7...WdYT) holds 265 SPL-Tokens
 
       // Store holdings in local database
       const stored: SplTokenStoreReponse = await updateHoldings(tokenHoldingsData, publicKey.toString());
@@ -165,6 +192,11 @@ async function fetchHoldings(walletToSync?: string): Promise<void> {
         if (sortedDuplicates.length > maxRows) {
           saveLogTo(duplicateLogs, `📢 There are ${sortedDuplicates.length + skippedMinHolders - maxRows} more duplicates not shown.`);
         }
+
+        // 🔥 Duplicate holdings
+        // ================================================================================
+        // 📢 There are 115 more duplicates not shown.
+        // 🔍 Token 9YX6...xQKW (3 💼): 👽 Open GMGN
       }
     }
 

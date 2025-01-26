@@ -31,6 +31,15 @@ export async function getWalletTokenHoldings(walletAddress: string): Promise<Get
     // Store the response data in a Typescript safe const
     const tokenAccounts: GetTokenAccountsResponse = res.data.result;
 
+    // tokenAccounts=   {
+    //     "address": "1rfxSmcYzqzrGTHFfQFWtNHQPAKwUWPuNhLH1mRmZuf",
+    //     "mint": "44MdeHeVjApQjNQMvcQUwUZsc2VEjHpjorsu9mdspump",
+    //     "owner": "KEN7s6mHAFpqmvppk7L9VaJW3htu3jz6z3dDjiaWdYT",
+    //     "amount": 32000000000000,
+    //     "delegated_amount": 0,
+    //     "frozen": false
+    // },
+
     // Double verify the holdings are for this waller
     const validHoldings: SplTokenHolding[] = tokenAccounts.token_accounts.filter((acc: any) => acc.owner && acc.owner === walletAddress);
     if (!validHoldings) {
@@ -96,6 +105,13 @@ export async function getDoubleHoldings(): Promise<MintWithOwnersResponse> {
     //     owners: [
     //       'owner1',
     //       'owner2'
+    //     ]
+    //   },
+    //{
+    //     mint: 'mint2',
+    //     owners: [
+    //       'owner3',
+    //       'owner4'
     //     ]
     //   }
     // ]

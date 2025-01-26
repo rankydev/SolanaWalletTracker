@@ -10,7 +10,7 @@ import {
   SplTokenStoreReponse,
 } from "./types";
 import { config } from "./config";
-import { updateHoldings } from "./db";
+import { clearHoldingsTable, updateHoldings } from "./db";
 
 // Load env variables
 dotenv.config();
@@ -34,8 +34,9 @@ const actionsLogs: string[] = [];
 let duplicateLogs: string[] = [];
 const holdingLogs = new Map<string, string>();
 function showLogs() {
+  console.log("\n".repeat(100));
   console.clear();
-  console.log(`📈 Tracked Wallets overview`);
+  console.log(`💼 Tracked Wallets overview`);
   console.log("================================================================================");
   if (SUBSCRIBE_WALLETS.length === 0) console.log("🔎 No wallets to track at this moment: ", new Date().toISOString());
   const holdingLogsArray = Array.from(holdingLogs.entries())
@@ -58,6 +59,12 @@ function showLogs() {
 let firstRun = true;
 async function fetchHoldings(walletToSync?: string): Promise<void> {
   try {
+    // Empty Database
+    if (firstRun) {
+      const removal = await clearHoldingsTable();
+      if (!removal) console.log("🚫 Could not remove database holdings. Please remove database manually and try again.");
+    }
+
     let wallets = SUBSCRIBE_WALLETS;
     if (walletToSync) {
       const filteredWallet = wallets.filter((w) => w.address === walletToSync);
@@ -67,7 +74,6 @@ async function fetchHoldings(walletToSync?: string): Promise<void> {
     for (const wallet of wallets) {
       const walletAddress = wallet.address;
       const walletName = wallet.name;
-      const walletTags = wallet.tags;
       const walletEmoji = wallet.emoji;
 
       // Verify if this is a valid walletAddress
@@ -134,13 +140,31 @@ async function fetchHoldings(walletToSync?: string): Promise<void> {
 
       // Output double holdings if exists
       if (doubleHoldings.duplicates.length !== 0) {
-        doubleHoldings.duplicates.forEach((d) => {
-          const duplicateMin = d.mint;
+        const maxRows = config.settings.show_max_duplicates || 10;
+        const minHolders = config.settings.show_duplicate_min_holders || 3;
+        let skippedMinHolders = 0;
+
+        // Sort duplicates by `owners.length` in descending order
+        const sortedDuplicates = doubleHoldings.duplicates.sort((a, b) => b.owners.length - a.owners.length);
+
+        sortedDuplicates.slice(0, maxRows).forEach((d) => {
+          const duplicateMint = d.mint;
+          const duplicateShortMint = shortenAddress(duplicateMint);
           const duplicateOwnersLength = d.owners.length;
 
-          const inspectText = `\x1b]8;;${config.settings.inspect_url}${duplicateMin}\x1b\\${config.settings.inspect_name}\x1b]8;;\x1b\\`;
-          saveLogTo(duplicateLogs, `🔍 Check duplicate token held by ${duplicateOwnersLength} wallets: ${inspectText}`);
+          // Check if minimum holders satisfies
+          if (duplicateOwnersLength >= minHolders) {
+            const inspectText = `\x1b]8;;${config.settings.inspect_url}${duplicateMint}\x1b\\${config.settings.inspect_name}\x1b]8;;\x1b\\`;
+            saveLogTo(duplicateLogs, `🔍 Token ${duplicateShortMint} (${duplicateOwnersLength} 💼): ${inspectText}`);
+          } else {
+            skippedMinHolders++;
+          }
         });
+
+        // If there are more duplicates, log a message
+        if (sortedDuplicates.length > maxRows) {
+          saveLogTo(duplicateLogs, `📢 There are ${sortedDuplicates.length + skippedMinHolders - maxRows} more duplicates not shown.`);
+        }
       }
     }
 
@@ -182,6 +206,7 @@ async function processQueue() {
 }
 
 // Subscription Stream
+let wasClosed = false;
 const subscriptions = new Map<number, string>();
 async function accountSubscribeStream(): Promise<void> {
   let ws: WebSocket | null = new WebSocket(process.env.HELIUS_WSS_URI || "");
@@ -224,7 +249,7 @@ async function accountSubscribeStream(): Promise<void> {
         const getWallet = accountInfo.id;
         const subscriptionId = accountInfo.result;
         const wallet = SUBSCRIBE_WALLETS.find((w) => w.address === getWallet);
-        saveLogTo(actionsLogs, `✅ Subscribed and listening to websocket stream for ${wallet?.emoji} ${wallet?.name}`);
+        if (!wasClosed) saveLogTo(actionsLogs, `✅ Subscribed and listening to websocket stream for ${wallet?.emoji} ${wallet?.name}`);
         // Store subscription for wallet
         subscriptions.set(subscriptionId, getWallet);
         showLogs();
@@ -247,6 +272,7 @@ async function accountSubscribeStream(): Promise<void> {
   let retryCount = 0;
   const maxRetries = 5;
   ws.on("close", () => {
+    wasClosed = true;
     console.log(`🔐 WebSocket closed. Reconnecting in ${2 ** retryCount}s...`);
     if (retryCount < maxRetries) {
       setTimeout(() => {

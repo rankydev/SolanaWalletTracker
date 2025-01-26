@@ -16,6 +16,7 @@ export async function createHoldingsTable(database: any): Promise<boolean> {
             frozen INTEGER DEFAULT 0
         );
       `);
+
     return true;
   } catch (error: any) {
     console.error("Error creating TokenData table:", error);
@@ -128,5 +129,29 @@ export async function checkMultipleOwnersForMint(): Promise<DuplicateOwnerMintRe
   } catch (error: any) {
     console.error("Error checking multiple owners for mint:", error);
     return [];
+  }
+}
+export async function clearHoldingsTable(): Promise<boolean> {
+  try {
+    const db = await open({
+      filename: config.db.db_name_tracker_transfers,
+      driver: sqlite3.Database,
+    });
+
+    // Create Table if not exists
+    const transfersTableExist = await createHoldingsTable(db);
+    if (!transfersTableExist) {
+      await db.close();
+      throw new Error("Could not create transfers table.");
+    }
+
+    await db.exec(`
+        DELETE FROM holdings;
+    `);
+
+    return true;
+  } catch (error: any) {
+    console.error("Error clearing the holdings table:", error);
+    return false;
   }
 }

@@ -5,7 +5,6 @@ import {
   GetWalletTokenHoldingsResponse,
   MintWithOwners,
   MintWithOwnersResponse,
-  NewTokenTransfersDetails,
   SplTokenHolding,
 } from "./types";
 import { checkMultipleOwnersForMint } from "./db";

@@ -1,8 +1,8 @@
 This repository contains all the code "as is", following the "Wallet Tracker Bot" on YouTube provided by [DigitalBenjamins](https://x.com/digbenjamins).
 
-Part 1: Solana Wallet Tracker Bot | Track Trending Wallets | View Buys/sells on GMGN
+Solana Wallet Tracker Bot | Track Trending Wallets | View Duplicate Holdings - Updated Version
 
-[![Solana Wallet Tracker Bot | Track Trending Wallets | View Buys/sells on GMGN](https://img.youtube.com/vi/qbZ6p9FdOQc/0.jpg)](https://www.youtube.com/watch?v=qbZ6p9FdOQc)
+[![Solana Wallet Tracker Bot | Track Trending Wallets | View Duplicate Holdings - Updated Version](https://img.youtube.com/vi/Dl8i_8cTy1E/0.jpg)](https://www.youtube.com/watch?v=Dl8i_8cTy1E)
 
 ## Project Description
 
@@ -10,7 +10,10 @@ The solana wallet tracker is a TypeScript bot designed to track wallets in real 
 
 ### Features
 
-- Track wallets
+- Track wallets and add your own call to action.
+- Track duplicate holdings
+- See when wallets buy and sell
+- See the amount of tokens hold by a wallet
 
 ### Third Party documentation
 
